@@ -1,0 +1,6 @@
+{
+  "name": "am around",
+  "description": "Ride-hailing aggregator mobile web app for viewing nearby vehicles, comparing estimated wait times, and checking fares across Grab, LINE MAN RIDE, Bolt, inDrive, Maxim, and TADA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
