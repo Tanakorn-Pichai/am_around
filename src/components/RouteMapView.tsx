@@ -6,8 +6,10 @@ import {
   useMap,
   useMapsLibrary,
 } from '@vis.gl/react-google-maps';
-import { Crosshair, LocateFixed, MapPin, Minus, Plus, RefreshCw } from 'lucide-react';
-import { ActiveSearchRoute, LocationItem, PinMode, RideOption } from '../types';
+import { Crosshair, LocateFixed, MapPin, Maximize2, Minimize2, Minus, Plus, RefreshCw } from 'lucide-react';
+import { ActiveSearchRoute, Language, LocationItem, PinMode, RideOption, ThemeMode, VehicleType } from '../types';
+import { computeEtaMinutes } from '../data/mockData';
+import { t } from '../utils/i18n';
 import { checkAndNotifyMapsQuotaError } from '../utils/mapsQuota';
 import {
   buildSurroundingRoadWaypoints,
@@ -25,6 +27,9 @@ interface RouteMapViewProps {
   selectedRideId: string | null;
   isLoading: boolean;
   pinMode: PinMode;
+  vehicleType: VehicleType;
+  lang: Language;
+  theme: ThemeMode;
   onChangePinMode: (mode: PinMode) => void;
   onPinLocation: (target: 'pickup' | 'destination', location: LocationItem) => void;
   onRouteMetricsResolved: (distanceKm: number, durationMinutes?: number) => void;
@@ -36,6 +41,7 @@ interface RouteMapViewProps {
 interface RouteOverlayProps {
   pickup: LocationItem;
   destination: LocationItem;
+  vehicleType: VehicleType;
   onRouteMetricsResolved: (distanceKm: number, durationMinutes?: number) => void;
   onRoadPathsResolved: (paths: LatLngPoint[][]) => void;
 }
@@ -48,6 +54,7 @@ interface RouteOverlayProps {
 const RouteOverlay: React.FC<RouteOverlayProps> = ({
   pickup,
   destination,
+  vehicleType,
   onRouteMetricsResolved,
   onRoadPathsResolved,
 }) => {
@@ -72,6 +79,7 @@ const RouteOverlay: React.FC<RouteOverlayProps> = ({
     const origin = { lat: pickup.lat, lng: pickup.lng };
     const dest = { lat: destination.lat, lng: destination.lng };
     const routeKey = `${origin.lat.toFixed(5)},${origin.lng.toFixed(5)}->${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}`;
+    const metricsKey = `${routeKey}|${vehicleType}`;
 
     const drawFallbackLine = () => {
       if (cancelled || !map) return;
@@ -134,7 +142,10 @@ const RouteOverlay: React.FC<RouteOverlayProps> = ({
 
     (async () => {
       try {
-        let res = await computeWithMode('TWO_WHEELER').catch(() => null);
+        let res =
+          vehicleType === 'car'
+            ? await computeWithMode('DRIVING')
+            : await computeWithMode('TWO_WHEELER').catch(() => null);
         if (!res?.routes || res.routes.length === 0) {
           res = await computeWithMode('DRIVING');
         }
@@ -201,8 +212,8 @@ const RouteOverlay: React.FC<RouteOverlayProps> = ({
           map.fitBounds(primaryRoute.viewport, { top: 52, right: 44, bottom: 44, left: 44 });
         }
 
-        if (primaryRoute.distanceMeters && lastReportedKeyRef.current !== routeKey) {
-          lastReportedKeyRef.current = routeKey;
+        if (primaryRoute.distanceMeters && lastReportedKeyRef.current !== metricsKey) {
+          lastReportedKeyRef.current = metricsKey;
           const distKm = Math.round((primaryRoute.distanceMeters / 1000) * 10) / 10;
           const durMin = primaryRoute.durationMillis
             ? Math.max(1, Math.round(primaryRoute.durationMillis / 60000))
@@ -274,6 +285,7 @@ const RouteOverlay: React.FC<RouteOverlayProps> = ({
     pickup.lng,
     destination.lat,
     destination.lng,
+    vehicleType,
     clearPolylines,
     onRouteMetricsResolved,
     onRoadPathsResolved,
@@ -285,20 +297,27 @@ const RouteOverlay: React.FC<RouteOverlayProps> = ({
 interface MapInnerControlsProps {
   pickup: LocationItem;
   destination: LocationItem;
+  lang: Language;
+  theme: ThemeMode;
   onLocateUser: () => void;
   onReshuffleRiders: () => void;
   isLocating: boolean;
+  isFullscreen: boolean;
 }
 
 const MapInnerControls: React.FC<MapInnerControlsProps> = ({
   pickup,
   destination,
+  lang,
+  theme: _theme,
   onLocateUser,
   onReshuffleRiders,
   isLocating,
+  isFullscreen,
 }) => {
   const map = useMap();
   const [isShuffling, setIsShuffling] = useState(false);
+  const strings = t(lang);
 
   const handleZoomIn = () => {
     if (!map) return;
@@ -327,38 +346,42 @@ const MapInnerControls: React.FC<MapInnerControlsProps> = ({
   };
 
   return (
-    <div className="absolute bottom-2.5 right-2.5 z-10 flex flex-col gap-1.5">
+    <div
+      className={`absolute ${
+        isFullscreen ? 'bottom-7 right-4' : 'bottom-2.5 right-2.5'
+      } z-10 flex flex-col gap-1.5`}
+    >
       <button
         type="button"
         onClick={handleReshuffleClick}
-        className="w-8 h-8 rounded-lg bg-white/95 hover:bg-white text-[#FF6B00] shadow-sm border border-black/10 flex items-center justify-center active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00]"
-        aria-label="สุ่มตำแหน่งรถบนถนนใหม่"
-        title="สุ่มตำแหน่งรถบนถนนใหม่"
+        className="w-8 h-8 rounded-lg bg-white/95 dark:bg-[#1E293B]/95 hover:bg-white dark:hover:bg-[#334155] text-[#FF6B00] shadow-sm border border-black/10 dark:border-white/10 flex items-center justify-center active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] cursor-pointer"
+        aria-label={strings.reshuffleTooltip}
+        title={strings.reshuffleTooltip}
       >
         <RefreshCw className={`w-3.5 h-3.5 ${isShuffling ? 'animate-spin' : ''}`} />
       </button>
       <button
         type="button"
         onClick={handleZoomIn}
-        className="w-8 h-8 rounded-lg bg-white/95 hover:bg-white text-[#374151] shadow-sm border border-black/10 flex items-center justify-center active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00]"
-        aria-label="ซูมเข้า"
+        className="w-8 h-8 rounded-lg bg-white/95 dark:bg-[#1E293B]/95 hover:bg-white dark:hover:bg-[#334155] text-[#374151] dark:text-[#E2E8F0] shadow-sm border border-black/10 dark:border-white/10 flex items-center justify-center active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] cursor-pointer"
+        aria-label={strings.zoomIn}
       >
         <Plus className="w-4 h-4" />
       </button>
       <button
         type="button"
         onClick={handleZoomOut}
-        className="w-8 h-8 rounded-lg bg-white/95 hover:bg-white text-[#374151] shadow-sm border border-black/10 flex items-center justify-center active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00]"
-        aria-label="ซูมออก"
+        className="w-8 h-8 rounded-lg bg-white/95 dark:bg-[#1E293B]/95 hover:bg-white dark:hover:bg-[#334155] text-[#374151] dark:text-[#E2E8F0] shadow-sm border border-black/10 dark:border-white/10 flex items-center justify-center active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] cursor-pointer"
+        aria-label={strings.zoomOut}
       >
         <Minus className="w-4 h-4" />
       </button>
       <button
         type="button"
         onClick={handleFitRoute}
-        className="w-8 h-8 rounded-lg bg-white/95 hover:bg-white text-[#FF6B00] shadow-sm border border-black/10 flex items-center justify-center active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00]"
-        aria-label="จัดกึ่งกลางเส้นทาง"
-        title="จัดกึ่งกลางเส้นทาง"
+        className="w-8 h-8 rounded-lg bg-white/95 dark:bg-[#1E293B]/95 hover:bg-white dark:hover:bg-[#334155] text-[#FF6B00] shadow-sm border border-black/10 dark:border-white/10 flex items-center justify-center active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] cursor-pointer"
+        aria-label={strings.fitRoute}
+        title={strings.fitRoute}
       >
         <LocateFixed className="w-4 h-4" />
       </button>
@@ -366,9 +389,9 @@ const MapInnerControls: React.FC<MapInnerControlsProps> = ({
         type="button"
         onClick={onLocateUser}
         disabled={isLocating}
-        className="w-8 h-8 rounded-lg bg-white/95 hover:bg-white text-[#111827] shadow-sm border border-black/10 flex items-center justify-center active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] disabled:opacity-50"
-        aria-label="ปักหมุดจุดรับที่ตำแหน่งปัจจุบัน"
-        title="ตำแหน่งปัจจุบัน (GPS)"
+        className="w-8 h-8 rounded-lg bg-white/95 dark:bg-[#1E293B]/95 hover:bg-white dark:hover:bg-[#334155] text-[#111827] dark:text-[#F3F4F6] shadow-sm border border-black/10 dark:border-white/10 flex items-center justify-center active:scale-95 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] disabled:opacity-50 cursor-pointer"
+        aria-label={strings.currentGps}
+        title={strings.currentGps}
       >
         <Crosshair className={`w-4 h-4 ${isLocating ? 'animate-spin text-[#FF6B00]' : ''}`} />
       </button>
@@ -383,6 +406,9 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
   selectedRideId,
   isLoading,
   pinMode,
+  vehicleType,
+  lang,
+  theme,
   onChangePinMode,
   onPinLocation,
   onRouteMetricsResolved,
@@ -390,12 +416,35 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
   onReshuffleRiders,
   onSelectRidePin,
 }) => {
+  const strings = t(lang);
   const placesLib = useMapsLibrary('places');
   const [isResolvingPin, setIsResolvingPin] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [liveRiderState, setLiveRiderState] = useState<
     Record<string, { lat: number; lng: number; etaMinutes: number }>
   >({});
+
+  // Lock background scroll & support Escape key when map is expanded to fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    const prevBodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.documentElement.style.overflow = prevHtmlOverflow;
+      document.body.style.overflow = prevBodyOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFullscreen]);
 
   const pathMetricsList = useMemo(
     () => roadPaths.map((path) => computeRoadPathMetrics(path)),
@@ -455,7 +504,7 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
       initialPositions[m.id] = {
         lat: pt.lat,
         lng: pt.lng,
-        etaMinutes: Math.max(2, Math.min(14, Math.round(distKm * 5.2 + 1))),
+        etaMinutes: computeEtaMinutes(distKm, vehicleType),
       };
     }
     setLiveRiderState(initialPositions);
@@ -495,7 +544,7 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
           m.lastPickupDistM = distToPickup;
 
           const distKm = Math.max(0.2, distToPickup / 1000);
-          const liveEta = Math.max(2, Math.min(14, Math.round(distKm * 5.2 + 1)));
+          const liveEta = computeEtaMinutes(distKm, vehicleType);
 
           nextPositions[m.id] = {
             lat: pt.lat,
@@ -514,7 +563,7 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
     return () => {
       window.cancelAnimationFrame(rafId);
     };
-  }, [rides, pathMetricsList, isLoading, route.pickup.lat, route.pickup.lng]);
+  }, [rides, pathMetricsList, isLoading, route.pickup.lat, route.pickup.lng, vehicleType]);
 
   /**
    * Resolves a dropped/dragged lat/lng into a human-readable Thai place name
@@ -620,22 +669,22 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
       {/* Pin Mode Selector Bar */}
       <div className="flex items-center justify-between gap-2">
         <div
-          className="grid grid-cols-3 w-full p-1 bg-[#F3F4F6] rounded-[12px] gap-1"
+          className="grid grid-cols-3 w-full p-1 bg-[#F3F4F6] dark:bg-[#1F2937] rounded-[12px] gap-1"
           role="tablist"
-          aria-label="โหมดปักหมุดบนแผนที่"
+          aria-label={strings.dragOrViewMap}
         >
           <button
             type="button"
             role="tab"
             aria-selected={pinMode === 'view'}
             onClick={() => onChangePinMode('view')}
-            className={`min-h-[36px] px-2 rounded-[9px] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] ${
+            className={`min-h-[36px] px-2 rounded-[9px] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] cursor-pointer ${
               pinMode === 'view'
-                ? 'bg-white text-[#111827] shadow-xs font-semibold'
-                : 'text-[#6B7280] hover:text-[#111827]'
+                ? 'bg-white dark:bg-[#374151] text-[#111827] dark:text-[#F9FAFB] shadow-xs font-semibold'
+                : 'text-[#6B7280] dark:text-[#9CA3AF] hover:text-[#111827] dark:hover:text-white'
             }`}
           >
-            <span>ลากหมุด / ดูแผนที่</span>
+            <span>{strings.dragOrViewMap}</span>
           </button>
 
           <button
@@ -643,14 +692,14 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
             role="tab"
             aria-selected={pinMode === 'pickup'}
             onClick={() => onChangePinMode(pinMode === 'pickup' ? 'view' : 'pickup')}
-            className={`min-h-[36px] px-2 rounded-[9px] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] ${
+            className={`min-h-[36px] px-2 rounded-[9px] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] cursor-pointer ${
               pinMode === 'pickup'
                 ? 'bg-[#FF6B00] text-white shadow-xs font-semibold'
-                : 'text-[#6B7280] hover:text-[#111827]'
+                : 'text-[#6B7280] dark:text-[#9CA3AF] hover:text-[#111827] dark:hover:text-white'
             }`}
           >
             <MapPin className="w-3.5 h-3.5 shrink-0" />
-            <span>ปักหมุดรับ</span>
+            <span>{strings.pinPickup}</span>
           </button>
 
           <button
@@ -660,35 +709,43 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
             onClick={() =>
               onChangePinMode(pinMode === 'destination' ? 'view' : 'destination')
             }
-            className={`min-h-[36px] px-2 rounded-[9px] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] ${
+            className={`min-h-[36px] px-2 rounded-[9px] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] cursor-pointer ${
               pinMode === 'destination'
-                ? 'bg-[#111827] text-white shadow-xs font-semibold'
-                : 'text-[#6B7280] hover:text-[#111827]'
+                ? 'bg-[#111827] dark:bg-white text-white dark:text-[#111827] shadow-xs font-semibold'
+                : 'text-[#6B7280] dark:text-[#9CA3AF] hover:text-[#111827] dark:hover:text-white'
             }`}
           >
             <MapPin className="w-3.5 h-3.5 shrink-0" />
-            <span>ปักปลายทาง</span>
+            <span>{strings.pinDest}</span>
           </button>
         </div>
       </div>
 
-      {/* Real Google Maps Viewport (Explicit Height per CF2) */}
+      {/* Layout placeholder while map is promoted to fullscreen */}
+      {isFullscreen && <div className="w-full h-[292px]" aria-hidden="true" />}
+
+      {/* Real Google Maps Viewport (Explicit Height inline, Full Viewport when expanded) */}
       <div
-        className={`relative w-full h-[292px] rounded-[16px] overflow-hidden border transition-colors ${
-          pinMode === 'pickup'
-            ? 'border-[#FF6B00] ring-2 ring-[#FF6B00]/25'
-            : pinMode === 'destination'
-            ? 'border-[#111827] ring-2 ring-[#111827]/20'
-            : 'border-[#E5E7EB]'
-        } bg-[#ECE9E4]`}
+        className={
+          isFullscreen
+            ? 'fixed inset-0 z-50 w-screen h-[100dvh] bg-[#ECE9E4] dark:bg-[#1A202C] overflow-hidden'
+            : `relative w-full h-[292px] rounded-[16px] overflow-hidden border transition-colors ${
+                pinMode === 'pickup'
+                  ? 'border-[#FF6B00] ring-2 ring-[#FF6B00]/25'
+                  : pinMode === 'destination'
+                  ? 'border-[#111827] dark:border-white/50 ring-2 ring-[#111827]/20 dark:ring-white/20'
+                  : 'border-[#E5E7EB] dark:border-white/10'
+              } bg-[#ECE9E4] dark:bg-[#1A202C]`
+        }
         role="region"
-        aria-label="แผนที่จริง Google Maps พร้อมระบบปักหมุด"
+        aria-label={strings.brandName}
       >
         <GoogleMap
           style={{ width: '100%', height: '100%' }}
           defaultCenter={{ lat: 13.812, lng: 100.493 }}
           defaultZoom={13}
           mapId="DEMO_MAP_ID"
+          colorScheme={theme === 'dark' ? 'DARK' : 'LIGHT'}
           gestureHandling="greedy"
           disableDefaultUI={true}
           clickableIcons={pinMode === 'view'}
@@ -699,6 +756,7 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
           <RouteOverlay
             pickup={route.pickup}
             destination={route.destination}
+            vehicleType={vehicleType}
             onRouteMetricsResolved={onRouteMetricsResolved}
             onRoadPathsResolved={onRoadPathsResolved}
           />
@@ -709,7 +767,7 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
             draggable={true}
             onDragEnd={(e) => handleMarkerDragEnd('pickup', e)}
             zIndex={30}
-            title={`จุดรับ: ${route.pickup.name} (ลากเพื่อย้ายหมุด)`}
+            title={`${strings.pickupLocation}: ${route.pickup.name}`}
           >
             <div className="relative flex items-center justify-center cursor-grab active:cursor-grabbing">
               {isLoading && (
@@ -720,7 +778,7 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
               )}
               <div className="relative flex flex-col items-center -translate-y-1">
                 <div className="px-2 py-0.5 mb-1 rounded-md bg-[#FF6B00] text-white text-[10px] font-semibold shadow-sm whitespace-nowrap max-w-[116px] truncate">
-                  รับ · {route.pickup.shortName}
+                  {lang === 'th' ? 'รับ · ' : 'Pick · '}{route.pickup.shortName}
                 </div>
                 <div className="w-5 h-5 rounded-full bg-[#FF6B00] border-[3px] border-white shadow-md" />
               </div>
@@ -733,13 +791,13 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
             draggable={true}
             onDragEnd={(e) => handleMarkerDragEnd('destination', e)}
             zIndex={35}
-            title={`ปลายทาง: ${route.destination.name} (ลากเพื่อย้ายหมุด)`}
+            title={`${strings.destinationLocation}: ${route.destination.name}`}
           >
             <div className="relative flex flex-col items-center cursor-grab active:cursor-grabbing -translate-y-1">
-              <div className="px-2.5 py-0.5 mb-1 rounded-full bg-[#111827] text-white text-[11px] font-semibold shadow-md whitespace-nowrap max-w-[132px] truncate">
+              <div className="px-2.5 py-0.5 mb-1 rounded-full bg-[#111827] dark:bg-[#1E293B] text-white text-[11px] font-semibold shadow-md whitespace-nowrap max-w-[132px] truncate border border-transparent dark:border-white/10">
                 {route.destination.shortName}
               </div>
-              <div className="w-5 h-5 rounded-full bg-[#111827] border-[3px] border-white shadow-md" />
+              <div className="w-5 h-5 rounded-full bg-[#111827] dark:bg-[#E2E8F0] border-[3px] border-white dark:border-[#111827] shadow-md" />
             </div>
           </AdvancedMarker>
 
@@ -759,14 +817,16 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
                   position={{ lat: markerLat, lng: markerLng }}
                   onClick={() => onSelectRidePin(ride)}
                   zIndex={isSelected ? 26 : isMoving ? 19 : 16}
-                  title={`${ride.serviceName} รอ ~${displayEta} นาที${
-                    isMoving ? ' (กำลังเคลื่อนที่บนถนน)' : ''
+                  title={`${ride.serviceName} ${strings.waitMinutes(displayEta)}${
+                    isMoving ? ` (${strings.movingOnRoad})` : ''
                   }`}
                 >
                   <div className="flex flex-col items-center cursor-pointer transition-transform hover:scale-105">
                     <div
-                      className={`px-1.5 py-[1px] mb-0.5 rounded-full bg-white text-[9.5px] font-semibold text-[#111827] shadow-xs tabular-nums border leading-tight flex items-center gap-1 ${
-                        isSelected ? 'border-[#FF6B00] text-[#FF6B00]' : 'border-black/10'
+                      className={`px-1.5 py-[1px] mb-0.5 rounded-full bg-white dark:bg-[#1E293B] text-[9.5px] font-semibold text-[#111827] dark:text-[#F3F4F6] shadow-xs tabular-nums border leading-tight flex items-center gap-1 ${
+                        isSelected
+                          ? 'border-[#FF6B00] text-[#FF6B00] dark:text-[#FF8A33]'
+                          : 'border-black/10 dark:border-white/15'
                       }`}
                     >
                       {isMoving && (
@@ -775,7 +835,7 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
                           aria-hidden="true"
                         />
                       )}
-                      <span>{displayEta} น.</span>
+                      <span>{displayEta} {strings.minuteShort}</span>
                     </div>
                     <div className="relative flex items-center justify-center">
                       {isMoving && (
@@ -786,7 +846,7 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
                         />
                       )}
                       <div
-                        className={`relative rounded-full flex items-center justify-center font-display font-bold text-white border-2 border-white shadow-md transition-all ${
+                        className={`relative rounded-full flex items-center justify-center font-display font-bold text-white border-2 border-white dark:border-[#1E293B] shadow-md transition-all ${
                           isSelected
                             ? 'w-7 h-7 text-[12px] ring-2 ring-[#FF6B00] ring-offset-1'
                             : 'w-6 h-6 text-[11px]'
@@ -809,39 +869,125 @@ export const RouteMapView: React.FC<RouteMapViewProps> = ({
           <MapInnerControls
             pickup={route.pickup}
             destination={route.destination}
+            lang={lang}
+            theme={theme}
             onLocateUser={handleLocateUser}
             onReshuffleRiders={onReshuffleRiders}
             isLocating={isLocating}
+            isFullscreen={isFullscreen}
           />
         </GoogleMap>
 
         {/* Top-Left Status / Active Pinning Prompt */}
-        <div className="absolute top-2.5 left-2.5 right-12 z-10 pointer-events-none flex items-center gap-1.5">
+        <div
+          className={`absolute ${
+            isFullscreen ? 'top-4 left-4 right-28' : 'top-2.5 left-2.5 right-12'
+          } z-10 pointer-events-none flex items-center gap-1.5`}
+        >
           {pinMode !== 'view' ? (
             <div
               className={`px-3 py-1.5 rounded-xl text-[12px] font-semibold text-white shadow-md flex items-center gap-1.5 ${
-                pinMode === 'pickup' ? 'bg-[#FF6B00]' : 'bg-[#111827]'
+                pinMode === 'pickup' ? 'bg-[#FF6B00]' : 'bg-[#111827] dark:bg-[#1F2937]'
               }`}
             >
               <MapPin className="w-3.5 h-3.5 shrink-0" />
               <span>
                 {pinMode === 'pickup'
-                  ? 'แตะบนแผนที่เพื่อปักหมุดจุดรับ'
-                  : 'แตะบนแผนที่เพื่อปักหมุดปลายทาง'}
+                  ? strings.tapMapToPinPickup
+                  : strings.tapMapToPinDest}
               </span>
             </div>
           ) : (
-            <div className="px-2.5 py-1 rounded-lg bg-white/92 backdrop-blur-sm border border-black/8 text-[11px] font-medium text-[#374151] tabular-nums shadow-xs">
+            <div className="px-2.5 py-1 rounded-lg bg-white/92 dark:bg-[#111827]/90 backdrop-blur-sm border border-black/8 dark:border-white/10 text-[11px] font-medium text-[#374151] dark:text-[#E5E7EB] tabular-nums shadow-xs">
               {isResolvingPin
-                ? 'กำลังระบุชื่อสถานที่...'
+                ? strings.resolvingLocation
                 : isLoading
-                ? 'กำลังค้นหารถใกล้คุณ...'
-                : `ระยะทาง ~${route.distanceKm.toFixed(1)} กม.${
-                    route.durationMinutes ? ` · ${route.durationMinutes} นาที` : ''
+                ? strings.searchingNearby
+                : `${strings.routeDistance(route.distanceKm)}${
+                    route.durationMinutes ? ` · ${strings.routeDuration(route.durationMinutes)}` : ''
                   }`}
             </div>
           )}
         </div>
+
+        {/* Top-Right Fullscreen Expand / Exit Button */}
+        <button
+          type="button"
+          onClick={() => setIsFullscreen((prev) => !prev)}
+          className={`absolute z-10 flex items-center justify-center gap-1.5 shadow-sm border border-black/10 dark:border-white/10 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF6B00] cursor-pointer ${
+            isFullscreen
+              ? 'top-4 right-4 h-9 px-3 rounded-xl bg-white/95 dark:bg-[#1E293B]/95 hover:bg-white dark:hover:bg-[#334155] text-[#111827] dark:text-[#F9FAFB] text-[12px] font-semibold'
+              : 'top-2.5 right-2.5 w-8 h-8 rounded-lg bg-white/95 dark:bg-[#1E293B]/95 hover:bg-white dark:hover:bg-[#334155] text-[#374151] dark:text-[#E2E8F0]'
+          }`}
+          aria-label={isFullscreen ? strings.exitFullscreen : strings.expandFullscreen}
+          title={isFullscreen ? strings.exitFullscreen : strings.expandFullscreen}
+        >
+          {isFullscreen ? (
+            <>
+              <Minimize2 className="w-4 h-4 text-[#FF6B00] shrink-0" />
+              <span>{strings.exitFullscreen}</span>
+            </>
+          ) : (
+            <Maximize2 className="w-3.5 h-3.5" />
+          )}
+        </button>
+
+        {/* Floating Pin Mode Selector inside Fullscreen Mode */}
+        {isFullscreen && (
+          <div className="absolute bottom-6 left-3 right-14 z-10 flex justify-center pointer-events-none">
+            <div
+              className="pointer-events-auto grid grid-cols-3 w-full max-w-[360px] p-1 bg-white/95 dark:bg-[#111827]/95 backdrop-blur-md rounded-[14px] gap-1 shadow-lg border border-black/10 dark:border-white/15"
+              role="tablist"
+              aria-label={strings.dragOrViewMap}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={pinMode === 'view'}
+                onClick={() => onChangePinMode('view')}
+                className={`min-h-[38px] px-2 rounded-[10px] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+                  pinMode === 'view'
+                    ? 'bg-[#F3F4F6] dark:bg-[#374151] text-[#111827] dark:text-[#F9FAFB] shadow-xs font-semibold'
+                    : 'text-[#6B7280] dark:text-[#9CA3AF] hover:text-[#111827] dark:hover:text-white'
+                }`}
+              >
+                <span>{strings.dragOrViewMap}</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={pinMode === 'pickup'}
+                onClick={() => onChangePinMode(pinMode === 'pickup' ? 'view' : 'pickup')}
+                className={`min-h-[38px] px-2 rounded-[10px] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+                  pinMode === 'pickup'
+                    ? 'bg-[#FF6B00] text-white shadow-xs font-semibold'
+                    : 'text-[#6B7280] dark:text-[#9CA3AF] hover:text-[#111827] dark:hover:text-white'
+                }`}
+              >
+                <MapPin className="w-3.5 h-3.5 shrink-0" />
+                <span>{strings.pinPickup}</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={pinMode === 'destination'}
+                onClick={() =>
+                  onChangePinMode(pinMode === 'destination' ? 'view' : 'destination')
+                }
+                className={`min-h-[38px] px-2 rounded-[10px] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+                  pinMode === 'destination'
+                    ? 'bg-[#111827] dark:bg-white text-white dark:text-[#111827] shadow-xs font-semibold'
+                    : 'text-[#6B7280] dark:text-[#9CA3AF] hover:text-[#111827] dark:hover:text-white'
+                }`}
+              >
+                <MapPin className="w-3.5 h-3.5 shrink-0" />
+                <span>{strings.pinDest}</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

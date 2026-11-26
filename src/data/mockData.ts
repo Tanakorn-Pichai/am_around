@@ -1,4 +1,4 @@
-import { ActiveSearchRoute, LocationItem, Provider, RideOption } from '../types';
+import { ActiveSearchRoute, LocationItem, Provider, ProviderId, RideOption, VehicleType } from '../types';
 import {
   computeRoadPathMetrics,
   distanceMeters,
@@ -27,6 +27,7 @@ export const INITIAL_PROVIDERS: Provider[] = [
     deepLinkScheme: 'grab://open',
     fallbackUrl: 'https://grab.com',
     serviceName: 'GrabBike',
+    carServiceName: 'GrabCar',
   },
   {
     id: 'lineman',
@@ -37,6 +38,7 @@ export const INITIAL_PROVIDERS: Provider[] = [
     deepLinkScheme: 'lineman://ride',
     fallbackUrl: 'https://lineman.line.me',
     serviceName: 'LINE MAN Bike',
+    carServiceName: 'LINE MAN Eco',
   },
   {
     id: 'bolt',
@@ -47,6 +49,7 @@ export const INITIAL_PROVIDERS: Provider[] = [
     deepLinkScheme: 'bolt://ride',
     fallbackUrl: 'https://bolt.eu',
     serviceName: 'Bolt Motorbike',
+    carServiceName: 'Bolt Economy',
   },
   {
     id: 'indrive',
@@ -57,6 +60,7 @@ export const INITIAL_PROVIDERS: Provider[] = [
     deepLinkScheme: 'indrive://open',
     fallbackUrl: 'https://indrive.com',
     serviceName: 'inDrive Moto',
+    carServiceName: 'inDrive Car',
   },
   {
     id: 'maxim',
@@ -67,6 +71,7 @@ export const INITIAL_PROVIDERS: Provider[] = [
     deepLinkScheme: 'maxim://order',
     fallbackUrl: 'https://taximaxim.com',
     serviceName: 'Maxim Bike',
+    carServiceName: 'Maxim Car',
   },
   {
     id: 'tada',
@@ -77,6 +82,7 @@ export const INITIAL_PROVIDERS: Provider[] = [
     deepLinkScheme: 'tada://ride',
     fallbackUrl: 'https://tada.global',
     serviceName: 'TADA Bike',
+    carServiceName: 'TADA AnyCar',
   },
 ];
 
@@ -252,6 +258,97 @@ const PROVIDER_FARE_MULTIPLIER: Record<string, number> = {
   indrive: 0.82,
 };
 
+const PROVIDER_SERVICE_MAP: Record<ProviderId, { motorbike: string; car: string }> = {
+  grab: { motorbike: 'GrabBike', car: 'GrabCar' },
+  lineman: { motorbike: 'LINE MAN Bike', car: 'LINE MAN Eco' },
+  bolt: { motorbike: 'Bolt Motorbike', car: 'Bolt Economy' },
+  indrive: { motorbike: 'inDrive Moto', car: 'inDrive Car' },
+  maxim: { motorbike: 'Maxim Bike', car: 'Maxim Car' },
+  tada: { motorbike: 'TADA Bike', car: 'TADA AnyCar' },
+};
+
+export function getServiceNameForVehicle(providerId: ProviderId, vehicleType: VehicleType): string {
+  return PROVIDER_SERVICE_MAP[providerId]?.[vehicleType] ?? providerId;
+}
+
+export function computeEstimatedFare(
+  providerId: ProviderId,
+  roadKm: number,
+  vehicleType: VehicleType
+): number {
+  const safeKm = Math.max(0.3, Math.round(roadKm * 10) / 10);
+  const fareScale = Math.max(0.35, safeKm / 6.4);
+  const fareMult = PROVIDER_FARE_MULTIPLIER[providerId] ?? 0.9;
+  if (vehicleType === 'car') {
+    return Math.max(55, Math.round((175 * fareScale * fareMult) / 5) * 5);
+  }
+  return Math.max(25, Math.round((95 * fareScale * fareMult) / 5) * 5);
+}
+
+export function computeEtaMinutes(distKm: number, vehicleType: VehicleType): number {
+  if (vehicleType === 'car') {
+    return Math.max(3, Math.min(18, Math.round(distKm * 6.8 + 2)));
+  }
+  return Math.max(2, Math.min(14, Math.round(distKm * 5.2 + 1)));
+}
+
+/**
+ * Converts existing ride options between motorbike and car, updating service names,
+ * estimated fares, ETAs, and cruising speeds.
+ */
+export function convertRidesToVehicleType(
+  rides: RideOption[],
+  roadKm: number,
+  vehicleType: VehicleType,
+  isDefaultPrdRoute = false
+): RideOption[] {
+  const updated = rides.map((ride) => {
+    const baseDefault = DEFAULT_NEARBY_RIDES.find((d) => d.id === ride.id);
+    const estimatedFare =
+      isDefaultPrdRoute && vehicleType === 'motorbike' && baseDefault
+        ? baseDefault.estimatedFare
+        : computeEstimatedFare(ride.providerId, roadKm, vehicleType);
+    const etaMinutes =
+      isDefaultPrdRoute && vehicleType === 'motorbike' && baseDefault
+        ? baseDefault.etaMinutes
+        : computeEtaMinutes(ride.distanceKm, vehicleType);
+    const speedMps =
+      vehicleType === 'car'
+        ? 5.2 + Math.random() * 3.4 // ~18 - 31 km/h Bangkok car speed
+        : 6.8 + Math.random() * 4.4; // ~24 - 40 km/h Bangkok motorbike speed
+
+    return {
+      ...ride,
+      vehicleType,
+      serviceName: getServiceNameForVehicle(ride.providerId, vehicleType),
+      estimatedFare,
+      etaMinutes,
+      isRecommended: false,
+      driverPin: {
+        ...ride.driverPin,
+        roadMotion: ride.driverPin.roadMotion
+          ? {
+              ...ride.driverPin.roadMotion,
+              speedMps,
+            }
+          : undefined,
+      },
+    };
+  });
+
+  let fastestIdx = 0;
+  updated.forEach((r, i) => {
+    if (r.etaMinutes < updated[fastestIdx].etaMinutes) {
+      fastestIdx = i;
+    }
+  });
+  if (updated[fastestIdx]) {
+    updated[fastestIdx].isRecommended = true;
+  }
+
+  return updated;
+}
+
 /**
  * Places each ride option at a distinct, randomized position snapped onto real continuous
  * road paths, and randomly assigns a subset of riders (~half) to cruise along the street
@@ -318,11 +415,13 @@ export function snapRidesToRoadPaths(
     const pos = placement.point;
     const distMeters = distanceMeters({ lat: pickup.lat, lng: pickup.lng }, pos);
     const distKm = Math.max(0.2, Math.round((distMeters / 1000) * 10) / 10);
-    const computedEta = Math.max(2, Math.min(14, Math.round(distKm * 5.2 + 1)));
+    const computedEta = computeEtaMinutes(distKm, ride.vehicleType);
 
     const isMoving = movingSet.has(idx) && placement.pathIndex !== null;
-    // Realistic Bangkok motorbike speed: 6.8 - 11.2 m/s (~24 - 40 km/h)
-    const speedMps = 6.8 + Math.random() * 4.4;
+    const speedMps =
+      ride.vehicleType === 'car'
+        ? 5.2 + Math.random() * 3.4
+        : 6.8 + Math.random() * 4.4;
     const direction: 1 | -1 = Math.random() < 0.5 ? 1 : -1;
 
     return {
@@ -370,14 +469,8 @@ export function updateRideFaresForDistance(
   rides: RideOption[],
   roadKm: number
 ): RideOption[] {
-  const safeKm = Math.max(0.3, Math.round(roadKm * 10) / 10);
-  const fareScale = Math.max(0.35, safeKm / 6.4);
   return rides.map((ride) => {
-    const fareMult = PROVIDER_FARE_MULTIPLIER[ride.providerId] ?? 0.9;
-    const estimatedFare = Math.max(
-      25,
-      Math.round((95 * fareScale * fareMult) / 5) * 5
-    );
+    const estimatedFare = computeEstimatedFare(ride.providerId, roadKm, ride.vehicleType);
     return {
       ...ride,
       estimatedFare,
@@ -388,7 +481,8 @@ export function updateRideFaresForDistance(
 export function buildRouteAndRides(
   pickup: LocationItem,
   destination: LocationItem,
-  overrideRoadKm?: number
+  overrideRoadKm?: number,
+  vehicleType: VehicleType = 'motorbike'
 ): { route: ActiveSearchRoute; rides: RideOption[] } {
   const straightMeters = Math.max(
     400,
@@ -411,8 +505,6 @@ export function buildRouteAndRides(
     [destination.lat, destination.lng],
   ];
 
-  const fareScale = Math.max(0.35, roadKm / 6.4);
-
   // Initial spread across 6 distinct randomized compass sectors before real-road snap completes
   const baseAngle = Math.random() * Math.PI * 2;
   const rides: RideOption[] = DEFAULT_NEARBY_RIDES.map((base, idx) => {
@@ -420,18 +512,21 @@ export function buildRouteAndRides(
     const radiusMeters = 300 + Math.random() * 650;
     const pt = offsetPoint({ lat: pickup.lat, lng: pickup.lng }, radiusMeters, angle);
     const distKm = Math.max(0.3, Math.round((radiusMeters / 1000) * 10) / 10);
-    const fareMult = PROVIDER_FARE_MULTIPLIER[base.providerId] ?? 0.9;
-    const estimatedFare = isDefaultPrdRoute
-      ? base.estimatedFare
-      : Math.max(25, Math.round((95 * fareScale * fareMult) / 5) * 5);
-    const etaMinutes = isDefaultPrdRoute
-      ? base.etaMinutes
-      : Math.max(2, Math.min(13, Math.round(distKm * 5.2 + 1)));
+    const estimatedFare =
+      isDefaultPrdRoute && vehicleType === 'motorbike'
+        ? base.estimatedFare
+        : computeEstimatedFare(base.providerId, roadKm, vehicleType);
+    const etaMinutes =
+      isDefaultPrdRoute && vehicleType === 'motorbike'
+        ? base.etaMinutes
+        : computeEtaMinutes(distKm, vehicleType);
 
     return {
       ...base,
+      vehicleType,
+      serviceName: getServiceNameForVehicle(base.providerId, vehicleType),
       etaMinutes,
-      distanceKm: isDefaultPrdRoute ? base.distanceKm : distKm,
+      distanceKm: isDefaultPrdRoute && vehicleType === 'motorbike' ? base.distanceKm : distKm,
       estimatedFare,
       isRecommended: false,
       driverPin: {

@@ -1,5 +1,7 @@
 export type ProviderId = 'grab' | 'lineman' | 'bolt' | 'indrive' | 'maxim' | 'tada';
 
+export type VehicleType = 'motorbike' | 'car';
+
 export interface Provider {
   id: ProviderId;
   name: string;
@@ -9,6 +11,7 @@ export interface Provider {
   deepLinkScheme: string;
   fallbackUrl: string;
   serviceName: string;
+  carServiceName: string;
 }
 
 export interface LocationItem {
@@ -51,7 +54,7 @@ export interface RideOption {
   providerId: ProviderId;
   providerName: string;
   serviceName: string;
-  vehicleType: 'motorbike';
+  vehicleType: VehicleType;
   etaMinutes: number;
   distanceKm: number;
   estimatedFare: number;
@@ -60,8 +63,23 @@ export interface RideOption {
   driverPin: DriverPin;
 }
 
-export type AppScreen = 'providers' | 'map' | 'handoff';
+export type AuthProviderType = 'google' | 'facebook' | 'email';
+
+export interface MockUser {
+  id: string;
+  name: string;
+  email: string;
+  avatarInitials: string;
+  avatarBg: string;
+  provider: AuthProviderType;
+}
+
+export type AppScreen = 'login' | 'providers' | 'map' | 'handoff';
 
 export type SortMode = 'fastest' | 'cheapest';
 
 export type PinMode = 'view' | 'pickup' | 'destination';
+
+export type Language = 'th' | 'en';
+
+export type ThemeMode = 'light' | 'dark';
