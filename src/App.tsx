@@ -37,6 +37,7 @@ const STORAGE_KEY_PROVIDERS = 'am_around_selected_providers_v1';
 const STORAGE_KEY_MOCK_USER = 'am_around_mock_user_v1';
 const STORAGE_KEY_THEME = 'am_around_theme_v1';
 const STORAGE_KEY_LANG = 'am_around_lang_v1';
+const MAPS_LIBRARIES: string[] = ['marker', 'places', 'routes'];
 
 function loadInitialTheme(): ThemeMode {
   try {
@@ -106,6 +107,8 @@ export default function App() {
 
   const [theme, setTheme] = useState<ThemeMode>(loadInitialTheme);
   const [lang, setLang] = useState<Language>(loadInitialLang);
+  // Keep APIProvider's language immutable for the page session to prevent Google Maps JS API reload warnings
+  const initialMapsLanguageRef = useRef<Language>(lang);
 
   const [currentUser, setCurrentUser] = useState<MockUser | null>(loadInitialMockUser);
   const [screen, setScreen] = useState<AppScreen>(() =>
@@ -444,9 +447,9 @@ export default function App() {
   return (
     <APIProvider
       apiKey={googleMapsApiKey}
-      language={lang}
+      language={initialMapsLanguageRef.current}
       region="TH"
-      libraries={['marker', 'places', 'routes']}
+      libraries={MAPS_LIBRARIES}
     >
       {/* Top-level non-intrusive Google Maps Platform Demo Quota Banner */}
       {mapsQuotaExceeded && (
